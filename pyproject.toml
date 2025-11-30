@@ -7,6 +7,6 @@ requires-python = ">=3.13"
 dependencies = [
     "black>=25.11.0",
     "isort>=7.0.0",
-    "langchain[google-genai]>=1.1.0",
+    "langchain[google-genai,ollama]>=1.1.0",
     "python-dotenv>=1.2.1",
 ]
