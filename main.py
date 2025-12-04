@@ -1,4 +1,6 @@
 from dotenv import load_dotenv
+from typing import List
+from pydantic import BaseModel, Field
 
 load_dotenv()
 from langchain.agents import create_agent
@@ -8,6 +10,17 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 
 # from tavily import TavilyClient
 from langchain_tavily import TavilySearch
+
+
+class Source(BaseModel):
+    """Source of the information"""
+    url:str =  Field(description="The url of the source")
+
+class  AgentResponse(BaseModel):
+    """Response of the agent"""
+    answer:str = Field(description="The answer to the question")
+    sources:List[Source] = Field(default_factory=list,description="The sources of the information")
+
 
 tavily_search = TavilySearch()
 
@@ -32,6 +45,7 @@ tools = [tavily_search]
 agent = create_agent(
     model=llm,
     tools=tools,
+    response_format=AgentResponse,
 )
 
 
