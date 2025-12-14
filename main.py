@@ -3,23 +3,24 @@ from typing import List
 from pydantic import BaseModel, Field
 
 load_dotenv()
+
+from langchainhub import Client
+hub = Client()
 from langchain.agents import create_agent
 from langchain.tools import tool
 from langchain_core.messages import HumanMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_core.output_parsers.pydantic import PydanticOutputParser
+from langchain_core.prompts import PromptTemplate
+from langchain_core.runnables import RunnableLambda
 
 # from tavily import TavilyClient
 from langchain_tavily import TavilySearch
 
+# Custom imports
 
-class Source(BaseModel):
-    """Source of the information"""
-    url:str =  Field(description="The url of the source")
-
-class  AgentResponse(BaseModel):
-    """Response of the agent"""
-    answer:str = Field(description="The answer to the question")
-    sources:List[Source] = Field(default_factory=list,description="The sources of the information")
+from schemas import Source, AgentResponse
+from prompt import REACT_PROMPT_WITH_FORMAT_INSTRUCTIONS
 
 
 tavily_search = TavilySearch()
@@ -42,6 +43,13 @@ tavily_search = TavilySearch()
 
 llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0)
 tools = [tavily_search]
+react_prompt = hub.pull("hwchase17/react")
+output_parser = PydanticOutputParser(pydantic_object=AgentResponse)
+react_prompt_with_format_instructions = PromptTemplate(
+    template=REACT_PROMPT_WITH_FORMAT_INSTRUCTIONS,
+    input_variables=["input", "agent_scratchpad", "tool_names"],
+).partial(format_instructions=output_parser.get_format_instructions())
+
 agent = create_agent(
     model=llm,
     tools=tools,
@@ -51,8 +59,21 @@ agent = create_agent(
 
 def main():
     print("Hello from langchain101!")
-    result = agent.invoke({"messages": [HumanMessage(content="What is the latest news about india?")]})
-    print(result)
+    query = "Tell 3 AI/ML jobs that are posted on linked in recently?"
+    result = agent.invoke({"messages": [HumanMessage(content=query)]})
+    
+    # Extract structured response
+    response: AgentResponse = result["structured_response"]
+    
+    print("\n" + "="*50)
+    print(f"INPUT: {query}")
+    print("="*50)
+    print(f"OUTPUT: {response.answer}")
+    print("="*50)
+    print("SOURCES:")
+    for source in response.sources:
+        print(f"  - {source.url}")
+    print("="*50)
 
 
 if __name__ == "__main__":
