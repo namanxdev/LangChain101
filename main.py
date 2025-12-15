@@ -1,49 +1,24 @@
 from dotenv import load_dotenv
-import json
-import re
 
 load_dotenv()
 
-from langchain.agents import create_agent as create_react_agent
+from langchain.agents import create_agent
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_tavily import TavilySearch
 
 # Custom imports
-from schemas import Source, AgentResponse
+from schemas import AgentResponse
 
 # Initialize tools and LLM
 tavily_search = TavilySearch(max_results=5)
 llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0)
 tools = [tavily_search]
 
-# Create the react agent using langgraph (modern approach)
-agent = create_react_agent(model=llm, tools=tools)
+# Create the react agent
+agent = create_agent(model=llm, tools=tools)
 
-
-def extract_sources_from_messages(messages) -> list[Source]:
-    """Extract source URLs from agent tool messages."""
-    sources = []
-    seen_urls = set()
-    
-    for msg in messages:
-        # Check for tool messages with Tavily results
-        if hasattr(msg, 'content') and isinstance(msg.content, str):
-            # Try to parse JSON content from tool responses
-            try:
-                if 'url' in msg.content.lower():
-                    # Find URLs in the content
-                    url_pattern = r'https?://[^\s\'"<>)}\]]+' 
-                    urls = re.findall(url_pattern, msg.content)
-                    for url in urls:
-                        # Clean up URL
-                        url = url.rstrip('.,;:')
-                        if url not in seen_urls:
-                            seen_urls.add(url)
-                            sources.append(Source(url=url))
-            except Exception:
-                pass
-    
-    return sources
+# Create a structured output LLM for formatting the final response
+structured_llm = llm.with_structured_output(AgentResponse)
 
 
 def run_agent(query: str) -> AgentResponse:
@@ -53,31 +28,40 @@ def run_agent(query: str) -> AgentResponse:
     
     # Extract the final answer from the last AI message
     messages = result.get("messages", [])
-    answer = ""
+    raw_answer = ""
+    tool_results = []
     
-    for msg in reversed(messages):
-        if hasattr(msg, 'content') and msg.type == "ai":
+    for msg in messages:
+        # Collect tool results for context
+        if msg.type == "tool" and hasattr(msg, 'content'):
+            tool_results.append(msg.content)
+        
+        # Get the final AI answer
+        if msg.type == "ai" and hasattr(msg, 'content'):
             content = msg.content
-            # Handle content that might be a list (multimodal format)
             if isinstance(content, list):
-                # Extract text from list of content blocks
                 text_parts = []
                 for item in content:
                     if isinstance(item, dict) and item.get('type') == 'text':
                         text_parts.append(item.get('text', ''))
                     elif isinstance(item, str):
                         text_parts.append(item)
-                answer = '\n'.join(text_parts)
+                raw_answer = '\n'.join(text_parts)
             elif isinstance(content, str):
-                answer = content
-            
-            if answer:
-                break
+                raw_answer = content
     
-    # Extract sources from tool messages
-    sources = extract_sources_from_messages(messages)
+    # Use structured output to format the response with sources
+    formatting_prompt = f"""Based on this agent response and tool results, create a structured response.
+
+Agent Answer: {raw_answer}
+
+Tool Results (contains source URLs): {tool_results[:2] if tool_results else 'None'}
+
+Extract the answer and any source URLs from the tool results."""
+
+    structured_response: AgentResponse = structured_llm.invoke(formatting_prompt)
     
-    return AgentResponse(answer=answer, sources=sources)
+    return structured_response
 
 def main():
     print("Hello from langchain101!")
